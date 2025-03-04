@@ -236,4 +236,4 @@ while True:
     pygame.draw.circle(screen, (255, 0, 0), dot_position, 10)
 
     pygame.display.flip()
-    clock.tick(120)
+    clock.tick(60)
