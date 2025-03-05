@@ -41,16 +41,16 @@ while running:
 
     # Read joystick axes
     surge = int((joystick.get_axis(5)+1)*50)   # Left stick Y (Throttle)
-    roll = max(min(int(joystick.get_axis(0) * 100), 100), -100)  # Left stick X (Roll)
-    direction_x = max(min(int(joystick.get_axis(2) * 100), 100), -100)  # Right stick X
-    direction_y = int((joystick.get_axis(4)+1)*50) # Right stick Y
+    direction_x = max(min(int(joystick.get_axis(2) * 100), 100), -100)  # Left stick X (Roll)
+    direction_y = max(min(int(joystick.get_axis(3) * 100), 100), -100)  # Right stick X
+    roll = max(min(int(joystick.get_axis(0) * 100), 100), -100)  # Right stick X # Right stick Y
 
 
     # Read buttons efficiently using bitwise OR
     button_state = sum(joystick.get_button(i) << i for i in range(6))  # Encode buttons as a bitmask
 
     # Pack data in a compact format (binary encoding reduces transmission time)
-    data_bytes = f"{surge},{roll},{direction_x},{direction_y},{button_state}".encode()
+    data_bytes = f"{surge},{direction_y},{direction_x},{roll},{button_state}".encode()
 
     # Send data over UDP
     sock.sendto(data_bytes, (UDP_IP, UDP_PORT))

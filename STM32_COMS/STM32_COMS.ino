@@ -6,7 +6,7 @@
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "MS5837.h"  // Include the Blue Robotics MS5837 library
 #include "INA219.h"
-#include <Servo.h>
+#include "Servo.h"
 
 
 
@@ -15,6 +15,8 @@ Servo FESC1; //Forward Motor 1
 Servo FESC2; //Forward Motor 2
 Servo DESC1; //Dive Motor 1
 Servo DESC2; //Dive motor 2
+volatile int state = 0; // 0 : Descend , 1 : Ascend 
+unsigned long lastToggleTime = 0;  // Global variable to store the last toggle time
 //-----------IMU CONFIG--------------
 MPU6050 mpu;
 MS5837 sensor;
@@ -35,7 +37,7 @@ float ypr[3];
 VectorInt16 aaWorld;  
 
 // Global array to store all sensor values (yaw deg, pitch deg, roll deg, accelX m/s^2, accelY m/s^2, accelZ/m/s^2, depth/m, temperature/deg C, bus voltage,shunt voltage/mV, current/mA, power/mW)
-volatile float sensorData[12] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};  
+volatile float sensorData[13] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0};  
 volatile int commandData[5] = {0, 0, 0, 0, 0};  // Global array for serial command data
 
 SemaphoreHandle_t xSensorMutex;  // Mutex for sensor data
@@ -49,7 +51,7 @@ void StatusLightTask(void *pvParameters);
 void printSensorData();
 
 void setup() {
-  Serial.begin(19200); 
+  Serial.begin(921600); 
   delay(2000);  // Allow serial to stabilize
 
   Wire.begin();
@@ -60,6 +62,7 @@ void setup() {
   DESC1.attach(PB0,1000,2000);
   DESC2.attach(PB1,1000,2000);
   pinMode(PC13, OUTPUT);
+  pinMode(PB10, OUTPUT);
 
   while (!sensor.init()) {
     digitalWrite(PC13, 0);
@@ -182,7 +185,7 @@ void ReadSensorsTask(void *pvParameters) {
         sensorData[9] = INA.getShuntVoltage_mV()/1000;
         sensorData[10] = INA.getCurrent_mA ()/1000;
         sensorData[11] = INA.getPower_mW()/1000;
-
+        sensorData[12] = state;
         xSemaphoreGive(xSensorMutex);
       }
     }
@@ -211,7 +214,7 @@ void heartbeat() {
 }
 
 // Function to print sensor data
-//Yaw,Pitch,Roll,Accelx,Accely,Accelz,depth,temp,bus voltage, shunt voltage, current, power, throttle, x,y, dive,button
+//Yaw,Pitch,Roll,Accelx,Accely,Accelz,depth,temp,bus voltage, shunt voltage, current, power,surge, y,x,corrected roll input,button
 void printSensorData() {
   if (xSemaphoreTake(xSensorMutex, portMAX_DELAY)) {
      Serial.print(sensorData[0]);Serial.print(",");
@@ -230,7 +233,8 @@ void printSensorData() {
      Serial.print(commandData[1]);Serial.print(",");
      Serial.print(commandData[2]);Serial.print(",");
      Serial.print(commandData[3]);Serial.print(",");
-     Serial.println(commandData[4]);
+     Serial.print(commandData[4]);Serial.print(",");
+     Serial.println(sensorData[12]);
     xSemaphoreGive(xSensorMutex);
   }
 }
@@ -242,25 +246,33 @@ void MotorControlTask(void *pvParameters) {
   while (1) {
     if (xSemaphoreTake(xCommandMutex, portMAX_DELAY)) {
       // Map throttle (0-100%) to PWM values (0-255)
-      int throttle = map(commandData[0],  0, 100, 0, 180);
-      int dirX = map(commandData[1], -100, 100, -255, 255);
-      int dirY = map(commandData[2], -100, 100, -255, 255);
-      int dive = map(commandData[3], 0, 100, 0, 255);
-      int button = commandData[4];
+      int surge = map(commandData[0],  0, 100, 0, 180);
+      int dirY = map(commandData[1], -100, 100, -255, 255);
+      int dirX = map(commandData[2], -100, 100, -255, 255);
+      int C_roll = map(commandData[3], 0, 100, 0, 255);
+      int button = commandData[4]; //if 16 we are in reverse mode set reverse relay high
 
+     if (button == 16 && (millis() - lastToggleTime >= 100)) {
+           state = !state;              // Toggle state
+          lastToggleTime = millis();   // Update the last toggle time
+       }
+
+  // Set PB10 HIGH or LOW based on state
+      if(state) {
+        digitalWrite(PB10, HIGH);
+      }
+      else {
+        digitalWrite(PB10, LOW);
+      }
+    
       // Example motor control logic
-      analogWrite(PA6, throttle);  // Motor 1 Speed
-      analogWrite(PA7, dirX);       // Motor 2 Speed
+      analogWrite(PA6, surge);  // Motor 1 Speed
+      analogWrite(PA7, dirY);       // Motor 2 Speed
       analogWrite(PB0, dirY);       // Motor 3 Speed
-      analogWrite(PB1, dive);       // Motor 4 Speed
+      analogWrite(PB1, C_roll);       // Motor 4 Speed
 
       // Example: Use the button command to stop motors
-      if (button == 1) {
-        digitalWrite(PA6, LOW);
-        digitalWrite(PA7, LOW);
-        digitalWrite(PB0, LOW);
-        digitalWrite(PB1, LOW);
-      }
+      
 
       xSemaphoreGive(xCommandMutex);
     }
